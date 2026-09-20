@@ -1,0 +1,294 @@
+import Foundation
+import Testing
+@testable import CodexBarCore
+
+private final class ConsoleRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    func append(_ value: String) {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        self.storage.append(value)
+    }
+
+    var values: [String] {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        return self.storage
+    }
+}
+
+/// Covers the migrated OpenCode Console contract at `opencode.ai/console`.
+///
+/// Migrated workspaces redirect the legacy `/workspace/<id>/go` page to the console login route and
+/// answer with an empty SPA shell, so the scraped `rollingUsage` payload is gone. These regressions
+/// pin the console JSON contract and keep the legacy page working for workspaces that have not
+/// migrated yet.
+@Suite(.serialized)
+struct OpenCodeGoConsoleMigrationTests {
+    private static let workspaceID = "wrk_TEST123"
+    private static let now = Date(timeIntervalSince1970: 1_789_862_400) // 2026-09-20T00:00:00Z
+
+    /// Micro-cent meters, matching the shape the console returns for a Go subscription.
+    private static func goStatusJSON(
+        fiveHourResetsAt: String = "\"2026-09-20T03:00:00.000Z\"",
+        includeMonth: Bool = true) -> String
+    {
+        // The month meter carries no reset timestamp; the billing period end stands in for it.
+        let month = includeMonth
+            ? #","month":{"limitMicroCents":"6000000000","usedMicroCents":"600000000"}"#
+            : ""
+        return """
+        {"renewalCurrency":"usd","useBalance":false,"cancelAtPeriodEnd":false,\
+        "access":{"startsAt":"2026-09-19T00:00:00.000Z","endsAt":"2026-10-19T00:00:00.000Z","meters":{\
+        "fiveHour":{"startsAt":"2026-09-19T23:00:00.000Z","resetsAt":\(fiveHourResetsAt),\
+        "limitMicroCents":"1200000000","usedMicroCents":"300000000"},\
+        "week":{"startsAt":"2026-09-14T00:00:00.000Z","resetsAt":"2026-09-21T00:00:00.000Z",\
+        "limitMicroCents":"3000000000","usedMicroCents":"1200000000"}\(month)}}}
+        """
+    }
+
+    /// The empty shell every console route serves, including the login redirect target.
+    private static let consoleShellHTML = """
+    <!DOCTYPE html><html><head><title>OpenCode Console</title>\
+    <script type="module" src="/console/assets/index.js"></script></head><body><div id="app"></div></body></html>
+    """
+
+    private func makeSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ConsoleMigrationURLProtocol.self]
+        return URLSession(configuration: config)
+    }
+
+    private static func makeResponse(
+        url: URL,
+        body: String,
+        statusCode: Int = 200,
+        contentType: String = "application/json") -> (HTTPURLResponse, Data)
+    {
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": contentType])!
+        return (response, Data(body.utf8))
+    }
+
+    @Test
+    func `parses console micro-cent meters into usage windows`() throws {
+        let snapshot = try OpenCodeGoUsageFetcher.parseSubscription(
+            text: Self.goStatusJSON(),
+            now: Self.now)
+
+        #expect(snapshot.rollingUsagePercent == 25)
+        #expect(snapshot.weeklyUsagePercent == 40)
+        #expect(snapshot.hasWeeklyUsage == true)
+        #expect(snapshot.hasMonthlyUsage == true)
+        #expect(snapshot.monthlyUsagePercent == 10)
+        #expect(snapshot.rollingResetInSec == 10800)
+        #expect(snapshot.weeklyResetInSec == 86400)
+        // 2026-09-20 -> 2026-10-19 is 29 days.
+        #expect(snapshot.monthlyResetInSec == 2_505_600)
+        #expect(snapshot.renewsAt == Date(timeIntervalSince1970: 1_792_368_000)) // 2026-10-19T00:00:00Z
+    }
+
+    @Test
+    func `console five-hour window without a reset timestamp reports no countdown`() throws {
+        let snapshot = try OpenCodeGoUsageFetcher.parseSubscription(
+            text: Self.goStatusJSON(fiveHourResetsAt: "null"),
+            now: Self.now)
+
+        #expect(snapshot.rollingUsagePercent == 25)
+        #expect(snapshot.rollingResetInSec == 0)
+        #expect(snapshot.weeklyResetInSec == 86400)
+    }
+
+    @Test
+    func `console status without a month meter keeps weekly reporting`() throws {
+        let snapshot = try OpenCodeGoUsageFetcher.parseSubscription(
+            text: Self.goStatusJSON(includeMonth: false),
+            now: Self.now)
+
+        #expect(snapshot.hasMonthlyUsage == false)
+        #expect(snapshot.monthlyUsagePercent == 0)
+        #expect(snapshot.weeklyUsagePercent == 40)
+    }
+
+    @Test
+    func `parses console workspace list`() {
+        let text = #"[{"id":"wrk_TEST123","name":"Default"},{"id":"wrk_TEST456","name":"Team"}]"#
+        #expect(OpenCodeGoUsageFetcher.parseConsoleWorkspaceIDs(text: text) == ["wrk_TEST123", "wrk_TEST456"])
+        #expect(OpenCodeGoUsageFetcher.parseConsoleWorkspaceIDs(text: #"{"error":"nope"}"#).isEmpty)
+        #expect(OpenCodeGoUsageFetcher.parseConsoleWorkspaceIDs(text: #"[{"id":"acc_TEST"}]"#).isEmpty)
+    }
+
+    @Test
+    func `migrated workspace reads usage from the console API`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        let requests = ConsoleRequestRecorder()
+        let workspaceHeaders = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            requests.append("\(request.httpMethod ?? "GET") \(url.path)")
+
+            switch url.path {
+            case "/console/api/orgs":
+                return Self.makeResponse(url: url, body: #"[{"id":"wrk_TEST123","name":"Default"}]"#)
+            case "/console/api/go/status":
+                guard let workspaceID = request.value(forHTTPHeaderField: "x-org-id") else {
+                    return Self.makeResponse(url: url, body: #"{"_tag":"BadRequest"}"#, statusCode: 400)
+                }
+                workspaceHeaders.append(workspaceID)
+                return Self.makeResponse(url: url, body: Self.goStatusJSON())
+            default:
+                // Migrated workspaces serve the empty console shell on every legacy route.
+                return Self.makeResponse(url: url, body: Self.consoleShellHTML, contentType: "text/html")
+            }
+        }
+
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "auth=test",
+            timeout: 2,
+            now: Self.now,
+            includeZenBalance: false,
+            session: self.makeSession())
+
+        #expect(snapshot.rollingUsagePercent == 25)
+        #expect(snapshot.weeklyUsagePercent == 40)
+        #expect(snapshot.monthlyUsagePercent == 10)
+        #expect(workspaceHeaders.values == [Self.workspaceID])
+        #expect(requests.values == ["GET /console/api/orgs", "GET /console/api/go/status"])
+    }
+
+    @Test
+    func `console workspace lookup is skipped when a workspace override is configured`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            requests.append("\(request.httpMethod ?? "GET") \(url.path)")
+            guard url.path == "/console/api/go/status" else {
+                return Self.makeResponse(url: url, body: Self.consoleShellHTML, contentType: "text/html")
+            }
+            return Self.makeResponse(url: url, body: Self.goStatusJSON())
+        }
+
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "auth=test",
+            timeout: 2,
+            now: Self.now,
+            workspaceIDOverride: Self.workspaceID,
+            includeZenBalance: false,
+            session: self.makeSession())
+
+        #expect(snapshot.rollingUsagePercent == 25)
+        #expect(requests.values == ["GET /console/api/go/status"])
+    }
+
+    @Test
+    func `unmigrated workspace falls back to the legacy usage page`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            requests.append("\(request.httpMethod ?? "GET") \(url.path)")
+
+            if url.path == "/console/api/go/status" {
+                // Workspaces that have not migrated are unknown to the console API.
+                return Self.makeResponse(url: url, body: #"{"_tag":"NotFound"}"#, statusCode: 404)
+            }
+            let page = """
+            <script>$R[41]={rollingUsage:$R[42]={status:"ok",resetInSec:5944,usagePercent:17},\
+            weeklyUsage:$R[43]={status:"ok",resetInSec:278201,usagePercent:75},\
+            monthlyUsage:$R[44]={status:"ok",resetInSec:880201,usagePercent:91}};</script>
+            """
+            return Self.makeResponse(url: url, body: page, contentType: "text/html")
+        }
+
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "auth=test",
+            timeout: 2,
+            now: Self.now,
+            workspaceIDOverride: Self.workspaceID,
+            includeZenBalance: false,
+            session: self.makeSession())
+
+        #expect(snapshot.rollingUsagePercent == 17)
+        #expect(snapshot.weeklyUsagePercent == 75)
+        #expect(snapshot.monthlyUsagePercent == 91)
+        #expect(requests.values == ["GET /console/api/go/status", "GET /workspace/wrk_TEST123/go"])
+    }
+
+    @Test
+    func `console rejects an expired session as invalid credentials`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            guard url.path.hasPrefix("/console/api/") else {
+                return Self.makeResponse(url: url, body: Self.consoleShellHTML, contentType: "text/html")
+            }
+            return Self.makeResponse(url: url, body: #"{"message":"Unauthorized"}"#, statusCode: 401)
+        }
+
+        do {
+            _ = try await OpenCodeGoUsageFetcher.fetchUsage(
+                cookieHeader: "auth=test",
+                timeout: 2,
+                now: Self.now,
+                includeZenBalance: false,
+                session: self.makeSession())
+            Issue.record("Expected OpenCodeGoUsageError.invalidCredentials")
+        } catch let error as OpenCodeGoUsageError {
+            guard case .invalidCredentials = error else {
+                Issue.record("Expected invalidCredentials, got: \(error)")
+                return
+            }
+        }
+    }
+
+    @Test
+    func `console JSON is not misread as a signed-out page`() {
+        // The console shell and its JSON payloads mention login routes; only HTTP status decides.
+        #expect(OpenCodeGoUsageFetcher.parseConsoleGoStatus(text: Self.goStatusJSON(), now: Self.now) != nil)
+        #expect(OpenCodeGoUsageFetcher.parseConsoleGoStatus(text: Self.consoleShellHTML, now: Self.now) == nil)
+        #expect(OpenCodeGoUsageFetcher.parseConsoleGoStatus(text: #"{"access":{}}"#, now: Self.now) == nil)
+    }
+}
+
+private final class ConsoleMigrationURLProtocol: URLProtocol {
+    private static let handlerBox = LockIsolated<((URLRequest) throws -> (HTTPURLResponse, Data))?>(nil)
+    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get { Self.handlerBox.value }
+        set { Self.handlerBox.setValue(newValue) }
+    }
+
+    override static func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "opencode.ai"
+    }
+
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            self.client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        do {
+            let (response, data) = try handler(self.request)
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: data)
+            self.client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            self.client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}

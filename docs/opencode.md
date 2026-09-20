@@ -12,13 +12,21 @@ read_when:
 - OpenCode Go usage API at `GET https://opencode.ai/zen/go/v1/usage`, authenticated by `OPENCODE_API_KEY` or
   `providers[].apiKey`.
 - OpenCode Go local history from `~/.local/share/opencode/opencode.db` on macOS and Linux.
-- `POST https://opencode.ai/_server` with server function IDs:
+- OpenCode Console JSON, used first for OpenCode Go web reads:
+  - `GET https://opencode.ai/console/api/orgs` lists workspaces (cookie auth only).
+  - `GET https://opencode.ai/console/api/go/status` returns subscription meters and requires the workspace in the
+    `x-org-id` header; the console answers HTTP 400 without it.
+- `POST https://opencode.ai/_server` with server function IDs, used for workspaces that have not migrated to the
+  console and for the Zen balance:
   - `workspaces` (`def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f`)
   - `subscription.get` (`7abeebee372f304e050aaaf92be863f4a86490e382f8c79db68fd94040d691b4`)
 
 ## Usage mapping
 - The Go usage API reports `usage.rolling/weekly/monthly.percent` in percentage units (0...100): `1` means 1%, and
   `0.5` means 0.5%. Generic dashboard JSON still accepts fractional usage values (0...1).
+- Console meters report micro-cents, not percentages: each of `access.meters.fiveHour/week/month` carries
+  `usedMicroCents` and `limitMicroCents`, and the percentage is `used / limit`. The month meter has no reset
+  timestamp, so the billing period end (`access.endsAt`) supplies the monthly countdown and the renewal date.
 - Primary window: rolling 5-hour usage (`rollingUsage.usagePercent`, `rollingUsage.resetInSec`).
 - Secondary window: optional weekly usage (`weeklyUsage.usagePercent`, `weeklyUsage.resetInSec`).
 - Resets computed as `now + resetInSec`.
@@ -47,6 +55,10 @@ usage is a separate [OpenAI provider](openai.md), not Codex subscription quota.
   selector.
 - Set `CODEXBAR_OPENCODE_WORKSPACE_ID` to skip workspace lookup and force a specific workspace.
 - Workspace override accepts a raw `wrk_…` ID or a full `https://opencode.ai/workspace/...` URL.
+- Console migration: OpenCode redirects migrated workspaces from `opencode.ai/workspace/<id>` to the console,
+  which serves an empty client-rendered shell, so the legacy scraped payload is absent. Web reads try the
+  console API first and fall back to the legacy page for workspaces that have not migrated. A signed-out
+  console session is reported as HTTP 401 and is never inferred from page text.
 - Cached cookies: Keychain cache `com.steipete.codexbar.cache` (account `cookie.opencode`, source + timestamp). Browser
   import only runs when the cached cookie fails.
 - OpenCode Go unscoped Auto mode tries daily cost history derived from local `opencode-go` assistant costs first,

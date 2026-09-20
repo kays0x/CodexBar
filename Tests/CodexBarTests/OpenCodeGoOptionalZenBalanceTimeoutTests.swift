@@ -30,6 +30,12 @@ struct OpenCodeGoOptionalZenBalanceTimeoutTests {
         OptionalZenBalanceTimeoutURLProtocol.handler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
             timeouts.append(request.timeoutInterval)
+            if url.path == "/console/api/orgs" {
+                return Self.makeResponse(
+                    url: url,
+                    body: #"[{"id":"wrk_TEST123","name":"Default"}]"#,
+                    contentType: "application/json")
+            }
             if url.path == "/_server" {
                 return Self.makeResponse(
                     url: url,

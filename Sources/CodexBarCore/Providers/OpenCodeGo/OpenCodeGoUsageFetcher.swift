@@ -31,6 +31,12 @@ public struct OpenCodeGoUsageFetcher: Sendable {
     private static let usageAPIURL = URL(string: "https://opencode.ai/zen/go/v1/usage")!
     private static let workspacesServerID = "def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f"
     private static let billingServerID = "c83b78a614689c38ebee981f9b39a8b377716db85c1fd7dbab604adc02d3313d"
+    /// Console workspace list. Cookie auth only; the workspace header is rejected here.
+    static let consoleWorkspacesURL = URL(string: "https://opencode.ai/console/api/orgs")!
+    /// Go subscription meters for the workspace named by `consoleWorkspaceHeaderField`.
+    static let consoleGoStatusURL = URL(string: "https://opencode.ai/console/api/go/status")!
+    /// The console answers HTTP 400 when this header is missing.
+    static let consoleWorkspaceHeaderField = "x-org-id"
 
     private static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
@@ -144,7 +150,7 @@ public struct OpenCodeGoUsageFetcher: Sendable {
             timeout: timeout,
             session: session)
         let subscriptionTask = Task {
-            try await self.fetchUsagePage(
+            try await self.fetchSubscriptionPayload(
                 workspaceID: workspaceID,
                 cookieHeader: requestCookieHeader,
                 timeout: timeout,
@@ -303,9 +309,11 @@ public struct OpenCodeGoUsageFetcher: Sendable {
         return true
     }
 
+    /// Opens the console route. The legacy `/workspace/<id>/go` page redirects migrated workspaces
+    /// to the console login screen, so it is no longer a usable destination.
     public static func dashboardURL(workspaceID raw: String?) -> URL {
         guard let workspaceID = OpenCodeWebParsing.normalizeWorkspaceID(raw),
-              let url = URL(string: "\(self.baseURL.absoluteString)/workspace/\(workspaceID)/go")
+              let url = URL(string: "\(self.baseURL.absoluteString)/console/\(workspaceID)/go")
         else {
             return self.authURL
         }
@@ -340,6 +348,13 @@ extension OpenCodeGoUsageFetcher {
         timeout: TimeInterval,
         session: URLSession) async throws -> String
     {
+        if let workspaceID = try await self.fetchConsoleWorkspaceID(
+            cookieHeader: cookieHeader,
+            timeout: timeout,
+            session: session)
+        {
+            return workspaceID
+        }
         let text = try await self.fetchServerText(
             request: ServerRequest(
                 serverID: self.workspacesServerID,
@@ -382,6 +397,34 @@ extension OpenCodeGoUsageFetcher {
         return ids[0]
     }
 
+    /// Reads the Go subscription payload, preferring the console API.
+    ///
+    /// Migrated workspaces redirect `opencode.ai/workspace/<id>/go` to the console login route and
+    /// answer with an empty SPA shell, so the scraped payload no longer exists. Workspaces that have
+    /// not migrated yet still serve the legacy page, which stays as the fallback.
+    private static func fetchSubscriptionPayload(
+        workspaceID: String,
+        cookieHeader: String,
+        timeout: TimeInterval,
+        session: URLSession) async throws -> String
+    {
+        do {
+            return try await self.fetchConsoleGoStatus(
+                workspaceID: workspaceID,
+                cookieHeader: cookieHeader,
+                timeout: timeout,
+                session: session)
+        } catch let error as OpenCodeGoUsageError {
+            if case .invalidCredentials = error { throw error }
+            Self.log.error("OpenCode Go console status unavailable; trying the legacy workspace page.")
+            return try await self.fetchUsagePage(
+                workspaceID: workspaceID,
+                cookieHeader: cookieHeader,
+                timeout: timeout,
+                session: session)
+        }
+    }
+
     private static func fetchUsagePage(
         workspaceID: String,
         cookieHeader: String,
@@ -406,6 +449,118 @@ extension OpenCodeGoUsageFetcher {
             throw OpenCodeGoUsageError.parseFailed("Missing usage fields.")
         }
         return text
+    }
+
+    // MARK: - Console API
+
+    private static func fetchConsoleWorkspaceID(
+        cookieHeader: String,
+        timeout: TimeInterval,
+        session: URLSession) async throws -> String?
+    {
+        do {
+            let text = try await self.fetchConsoleText(
+                url: self.consoleWorkspacesURL,
+                workspaceID: nil,
+                cookieHeader: cookieHeader,
+                timeout: timeout,
+                session: session)
+            return self.parseConsoleWorkspaceIDs(text: text).first
+        } catch let error as OpenCodeGoUsageError {
+            if case .invalidCredentials = error { throw error }
+            Self.log.error("OpenCode Go console workspaces unavailable; trying the legacy server function.")
+            return nil
+        }
+    }
+
+    private static func fetchConsoleGoStatus(
+        workspaceID: String,
+        cookieHeader: String,
+        timeout: TimeInterval,
+        session: URLSession) async throws -> String
+    {
+        let text = try await self.fetchConsoleText(
+            url: self.consoleGoStatusURL,
+            workspaceID: workspaceID,
+            cookieHeader: cookieHeader,
+            timeout: timeout,
+            session: session)
+        guard self.parseConsoleGoStatus(text: text, now: Date()) != nil else {
+            Self.log.error("OpenCode Go console status payload missing usage fields.")
+            throw OpenCodeGoUsageError.parseFailed("Missing usage fields.")
+        }
+        return text
+    }
+
+    /// Console responses are JSON and report a signed-out session as HTTP 401, so unlike the legacy
+    /// pages they must not be classified by body text.
+    private static func fetchConsoleText(
+        url: URL,
+        workspaceID: String?,
+        cookieHeader: String,
+        timeout: TimeInterval,
+        session: URLSession) async throws -> String
+    {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        request.setValue(self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let workspaceID {
+            request.setValue(workspaceID, forHTTPHeaderField: self.consoleWorkspaceHeaderField)
+        }
+
+        let httpResponse = try await session.response(for: request)
+        guard httpResponse.statusCode == 200 else {
+            let bodyText = String(data: httpResponse.data, encoding: .utf8) ?? ""
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                throw OpenCodeGoUsageError.invalidCredentials
+            }
+            if let message = self.extractServerErrorMessage(from: bodyText) {
+                throw OpenCodeGoUsageError.apiError("HTTP \(httpResponse.statusCode): \(message)")
+            }
+            throw OpenCodeGoUsageError.apiError("HTTP \(httpResponse.statusCode)")
+        }
+        guard let text = String(data: httpResponse.data, encoding: .utf8) else {
+            throw OpenCodeGoUsageError.parseFailed("Response was not UTF-8.")
+        }
+        return text
+    }
+
+    static func parseConsoleWorkspaceIDs(text: String) -> [String] {
+        guard let data = text.data(using: .utf8),
+              let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+        else {
+            return []
+        }
+        return rows.compactMap { $0["id"] as? String }.filter { $0.hasPrefix("wrk_") }
+    }
+
+    /// Converts the console's micro-cent meters into the percentage windows the snapshot models.
+    /// The month meter carries no reset timestamp, so the billing period end stands in for it.
+    static func parseConsoleGoStatus(text: String, now: Date) -> OpenCodeGoUsageSnapshot? {
+        guard let data = text.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let access = root["access"] as? [String: Any],
+              let meters = access["meters"] as? [String: Any],
+              let rolling = meters["fiveHour"] as? [String: Any]
+        else {
+            return nil
+        }
+
+        let renewsAt = self.dateValue(from: access["endsAt"])
+        var monthly = meters["month"] as? [String: Any]
+        if monthly?["resetsAt"] == nil, let endsAt = access["endsAt"] {
+            monthly?["resetsAt"] = endsAt
+        }
+
+        return self.buildSnapshot(
+            rolling: rolling,
+            weekly: meters["week"] as? [String: Any],
+            monthly: monthly,
+            now: now,
+            renewsAt: renewsAt)
     }
 
     static func parseAPIUsage(text: String, now: Date) throws -> OpenCodeGoUsageSnapshot {
@@ -479,6 +634,11 @@ extension OpenCodeGoUsageFetcher {
               let dict = object as? [String: Any]
         else {
             return nil
+        }
+
+        // The console reports micro-cent meters, which the generic window parser cannot key on.
+        if let snapshot = self.parseConsoleGoStatus(text: text, now: now) {
+            return snapshot
         }
 
         let renewsAt = self.dateValue(from: OpenCodeWebParsing.value(from: dict, keys: self.renewAtKeys))
@@ -701,8 +861,8 @@ extension OpenCodeGoUsageFetcher {
         let percentIsDirect = percent != nil
 
         if percent == nil {
-            let usedKeys = ["used", "usage", "consumed", "count", "usedTokens"]
-            let limitKeys = ["limit", "total", "quota", "max", "cap", "tokenLimit"]
+            let usedKeys = ["used", "usage", "consumed", "count", "usedTokens", "usedMicroCents"]
+            let limitKeys = ["limit", "total", "quota", "max", "cap", "tokenLimit", "limitMicroCents"]
             var used: Double?
             for key in usedKeys {
                 if let value = self.doubleValue(from: dict[key]) {
