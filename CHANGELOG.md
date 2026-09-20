@@ -14,6 +14,7 @@
 - Linux installation: preserve managed configuration symlinks and UTF-8 glyphs across reinstalls, and recover dangling Omarchy adapter links (#3784). Thanks @jsonMartin!
 - Linux packaging: include executable contents when the selected binary is a symlink, keeping archives self-contained (#3784).
 - OpenCode Go: read web usage from the OpenCode Console API so migrated workspaces report their 5-hour, weekly, and monthly windows again, instead of failing as expired credentials; workspaces still on the legacy page are unchanged (refs #3783). Thanks @kays0x!
+- OpenCode Go: read web usage from the OpenCode Console API and forward the console session cookie so migrated workspaces report their 5-hour, weekly, and monthly windows again, instead of failing as expired credentials; workspaces still on the legacy page are unchanged (refs #3783). Thanks @kays0x!
 
 ### Improved
 

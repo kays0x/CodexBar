@@ -8,7 +8,9 @@ read_when:
 # OpenCode provider
 
 ## Data sources
-- Browser cookies from `opencode.ai`.
+- Browser cookies from `opencode.ai`. Two session cookies matter: `auth` (legacy pages and server
+  functions) and `__Host-console_session` (the console). Both are forwarded, and either one alone is
+  enough for an import to succeed, because a migrated workspace may carry only the console cookie.
 - OpenCode Go usage API at `GET https://opencode.ai/zen/go/v1/usage`, authenticated by `OPENCODE_API_KEY` or
   `providers[].apiKey`.
 - OpenCode Go local history from `~/.local/share/opencode/opencode.db` on macOS and Linux.
