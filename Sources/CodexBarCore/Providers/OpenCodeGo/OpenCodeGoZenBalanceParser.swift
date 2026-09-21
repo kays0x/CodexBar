@@ -3,6 +3,26 @@ import Foundation
 enum OpenCodeGoZenBalanceParser {
     private static let billingScale = 100_000_000.0
 
+    static func parseConsoleBillingStatus(text: String) throws -> Double? {
+        guard let data = text.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let billingMode = root["billingMode"] as? String,
+              ["prepaid", "legacy", "seat", "credit"].contains(billingMode),
+              let mode = root["mode"] as? String,
+              ["pay-as-you-go", "invoiceable"].contains(mode)
+        else { throw OpenCodeGoUsageError.parseFailed("Invalid Console billing payload.") }
+        guard billingMode == "prepaid", mode == "pay-as-you-go" else { return nil }
+        guard let raw = root["balanceMicroCents"] as? String else {
+            throw OpenCodeGoUsageError.parseFailed("Missing Console balance.")
+        }
+        let digits = raw.hasPrefix("-") ? raw.dropFirst() : raw[...]
+        guard !digits.isEmpty,
+              digits.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+              let balance = Double(raw), balance.isFinite
+        else { throw OpenCodeGoUsageError.parseFailed("Invalid Console balance.") }
+        return balance / self.billingScale
+    }
+
     static func parse(text: String) -> Double? {
         if let value = self.parseJSON(text: text) {
             return value
@@ -16,35 +36,6 @@ enum OpenCodeGoZenBalanceParser {
         }
         let nearbyPattern = #"(?i)(?:balance|残高)[\s\S]{0,120}?\$\s*([0-9][0-9,]*(?:\.[0-9]+)?)"#
         return self.extractDollarValue(pattern: nearbyPattern, text: text)
-    }
-
-    /// Reads the console's prepaid balance, which uses the same micro-cent scale as the legacy
-    /// billing response. `availableMicroCents` stands in when a credit limit hides the raw balance.
-    static func parseConsoleBillingStatus(text: String) -> Double? {
-        guard let data = text.data(using: .utf8),
-              let dict = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any]
-        else {
-            return nil
-        }
-        for key in ["balanceMicroCents", "availableMicroCents"] {
-            if let raw = self.numberValue(from: dict[key]) {
-                return raw / self.billingScale
-            }
-        }
-        return nil
-    }
-
-    private static func numberValue(from value: Any?) -> Double? {
-        let number: Double? = switch value {
-        case let number as NSNumber:
-            number.doubleValue
-        case let string as String:
-            Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
-        default:
-            nil
-        }
-        guard let number, number.isFinite else { return nil }
-        return number
     }
 
     static func parseBillingServerResponse(text: String) -> Double? {

@@ -107,8 +107,23 @@ struct OpenCodeGoConsoleMigrationTests {
             now: Self.now)
 
         #expect(snapshot.rollingUsagePercent == 25)
-        #expect(snapshot.rollingResetInSec == 0)
+        #expect(snapshot.rollingResetInSec == nil)
         #expect(snapshot.weeklyResetInSec == 86400)
+        #expect(snapshot.toUsageSnapshot().primary?.resetsAt == nil)
+        let encoded = try JSONEncoder().encode(snapshot.toUsageSnapshot())
+        #expect(try JSONDecoder().decode(UsageSnapshot.self, from: encoded).primary?.resetsAt == nil)
+        let legacy = try OpenCodeGoUsageFetcher.parseSubscription(text: Self.legacyUsage, now: Self.now)
+        #expect(legacy.applyingWebUsage(snapshot).toUsageSnapshot().primary?.resetsAt == nil)
+    }
+
+    @Test
+    func `null monthly reset uses the console billing period end`() throws {
+        let text = Self.goStatusJSON().replacingOccurrences(
+            of: #""month":{"#,
+            with: #""month":{"resetsAt":null,"#)
+        let snapshot = try OpenCodeGoUsageFetcher.parseSubscription(text: text, now: Self.now)
+        #expect(snapshot.monthlyResetInSec == 2_505_600)
+        #expect(snapshot.toUsageSnapshot().tertiary?.resetsAt == snapshot.renewsAt)
     }
 
     @Test
@@ -193,6 +208,32 @@ struct OpenCodeGoConsoleMigrationTests {
 
         #expect(snapshot.rollingUsagePercent == 25)
         #expect(requests.values == ["GET /console/api/go/status"])
+    }
+
+    @Test(arguments: [false, true])
+    func `console organization IDs preserve workspace scope`(workspaceOverride: Bool) async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            requests.append(url.path)
+            if url.path == "/console/api/orgs" {
+                return Self.makeResponse(url: url, body: #"[{"id":"org_TEST123"}]"#)
+            }
+            #expect(url.path == "/console/api/go/status")
+            #expect(request.value(forHTTPHeaderField: "x-org-id") == "org_TEST123")
+            return Self.makeResponse(url: url, body: Self.goStatusJSON())
+        }
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "__Host-console_session=synthetic",
+            timeout: 2,
+            workspaceIDOverride: workspaceOverride ? "https://opencode.ai/console/org_TEST123/go" : nil,
+            includeZenBalance: false,
+            session: self.makeSession())
+        #expect(snapshot.rollingUsagePercent == 25)
+        let discovery = workspaceOverride ? [] : ["/console/api/orgs"]
+        #expect(requests.values == discovery + ["/console/api/go/status"])
+        #expect(OpenCodeGoUsageFetcher.dashboardURL(workspaceID: "org_TEST123").path == "/console/org_TEST123/go")
     }
 
     @Test
@@ -329,12 +370,17 @@ struct OpenCodeGoConsoleMigrationTests {
         let balance = try #require(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: payload))
         #expect((balance - 27.86781005).magnitude < 0.000001)
 
-        // A credit limit can hide the raw balance, so the available amount stands in.
+        // Available credit is a different field and cannot stand in for a missing balance.
         let availableOnly = #"{"mode":"pay-as-you-go","availableMicroCents":1500000000}"#
-        #expect(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: availableOnly) == 15)
-
-        #expect(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: #"{"mode":"none"}"#) == nil)
-        #expect(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: Self.consoleShellHTML) == nil)
+        #expect(throws: OpenCodeGoUsageError.self) {
+            try OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: availableOnly)
+        }
+        #expect(throws: OpenCodeGoUsageError.self) {
+            try OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: #"{"mode":"none"}"#)
+        }
+        #expect(throws: OpenCodeGoUsageError.self) {
+            try OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: Self.consoleShellHTML)
+        }
     }
 
     @Test
@@ -352,7 +398,7 @@ struct OpenCodeGoConsoleMigrationTests {
             case "/console/api/billing/status":
                 return Self.makeResponse(
                     url: url,
-                    body: #"{"mode":"pay-as-you-go","balanceMicroCents":"2786781005"}"#)
+                    body: #"{"billingMode":"prepaid","mode":"pay-as-you-go","balanceMicroCents":"2786781005"}"#)
             default:
                 // A migrated workspace has no Go subscription and no legacy payload.
                 return Self.makeResponse(url: url, body: Self.consoleShellHTML, contentType: "text/html")
@@ -403,6 +449,146 @@ struct OpenCodeGoConsoleMigrationTests {
         #expect(OpenCodeGoUsageFetcher.parseConsoleGoStatus(text: Self.consoleShellHTML, now: Self.now) == nil)
         #expect(OpenCodeGoUsageFetcher.parseConsoleGoStatus(text: #"{"access":{}}"#, now: Self.now) == nil)
     }
+
+    @Test(arguments: [401, 403], [false, true])
+    func `legacy session survives independent console authentication rejection`(
+        statusCode: Int,
+        workspaceOverride: Bool) async throws
+    {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            requests.append(url.path)
+            if url.path.hasPrefix("/console/api/") {
+                return Self.makeResponse(url: url, body: "{}", statusCode: statusCode)
+            }
+            if url.path == "/_server" {
+                return Self.makeResponse(url: url, body: #"[{"id":"wrk_TEST123"}]"#)
+            }
+            return Self.makeResponse(url: url, body: Self.legacyUsage)
+        }
+
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "auth=legacy; __Host-console_session=expired",
+            timeout: 2,
+            workspaceIDOverride: workspaceOverride ? Self.workspaceID : nil,
+            includeZenBalance: false,
+            session: self.makeSession())
+
+        #expect(snapshot.rollingUsagePercent == 17)
+        let discovery = workspaceOverride ? [] : ["/console/api/orgs", "/_server"]
+        #expect(requests.values == discovery + ["/console/api/go/status", "/workspace/wrk_TEST123/go"])
+    }
+
+    @Test(arguments: [URLError.Code.timedOut, .networkConnectionLost], [false, true])
+    func `legacy reads recover from console transport errors`(
+        code: URLError.Code,
+        workspaceOverride: Bool) async throws
+    {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            requests.append(url.path)
+            if url.path.hasPrefix("/console/api/") { throw URLError(code) }
+            if url.path == "/_server" {
+                return Self.makeResponse(url: url, body: #"[{"id":"wrk_TEST123"}]"#)
+            }
+            return Self.makeResponse(url: url, body: Self.legacyUsage)
+        }
+
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "auth=legacy",
+            timeout: 2,
+            workspaceIDOverride: workspaceOverride ? Self.workspaceID : nil,
+            includeZenBalance: false,
+            session: self.makeSession())
+
+        #expect(snapshot.rollingUsagePercent == 17)
+        let discovery = workspaceOverride ? [] : ["/console/api/orgs", "/_server"]
+        #expect(requests.values == discovery + ["/console/api/go/status", "/workspace/wrk_TEST123/go"])
+    }
+
+    @Test(arguments: [false, true])
+    func `console cancellation never starts a legacy request`(workspaceOverride: Bool) async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            try requests.append(#require(request.url).path)
+            throw URLError(.cancelled)
+        }
+
+        do {
+            _ = try await OpenCodeGoUsageFetcher.fetchUsage(
+                cookieHeader: "auth=legacy; __Host-console_session=console",
+                timeout: 2,
+                workspaceIDOverride: workspaceOverride ? Self.workspaceID : nil,
+                includeZenBalance: false,
+                session: self.makeSession())
+            Issue.record("Expected cancellation")
+        } catch is CancellationError {
+            // Cancellation can be normalized by the provider's task boundary.
+        } catch let error as URLError {
+            #expect(error.code == .cancelled)
+        }
+        #expect(requests.values == [workspaceOverride ? "/console/api/go/status" : "/console/api/orgs"])
+    }
+
+    @Test(arguments: [false, true])
+    func `console certificate failures never start legacy requests`(workspaceOverride: Bool) async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            try requests.append(#require(request.url).path)
+            throw URLError(.serverCertificateUntrusted)
+        }
+
+        do {
+            _ = try await OpenCodeGoUsageFetcher.fetchUsage(
+                cookieHeader: "auth=legacy; __Host-console_session=console",
+                timeout: 2,
+                workspaceIDOverride: workspaceOverride ? Self.workspaceID : nil,
+                includeZenBalance: false,
+                session: self.makeSession())
+            Issue.record("Expected certificate failure")
+        } catch let error as URLError {
+            #expect(error.code == .serverCertificateUntrusted)
+        }
+        #expect(requests.values == [workspaceOverride ? "/console/api/go/status" : "/console/api/orgs"])
+    }
+
+    @Test(arguments: [false, true])
+    func `console-only expired sessions do not attempt legacy authentication`(workspaceOverride: Bool) async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            requests.append(url.path)
+            return Self.makeResponse(url: url, body: "{}", statusCode: 401)
+        }
+
+        do {
+            _ = try await OpenCodeGoUsageFetcher.fetchUsage(
+                cookieHeader: "__Host-console_session=expired",
+                timeout: 2,
+                workspaceIDOverride: workspaceOverride ? Self.workspaceID : nil,
+                includeZenBalance: false,
+                session: self.makeSession())
+            Issue.record("Expected invalid credentials")
+        } catch let error as OpenCodeGoUsageError {
+            guard case .invalidCredentials = error else {
+                Issue.record("Expected invalid credentials, got \(error)")
+                return
+            }
+        }
+        #expect(requests.values == [workspaceOverride ? "/console/api/go/status" : "/console/api/orgs"])
+    }
+
+    private static let legacyUsage = """
+    {"rollingUsage":{"usagePercent":17,"resetInSec":5944},\
+    "weeklyUsage":{"usagePercent":75,"resetInSec":278201}}
+    """
 }
 
 private final class ConsoleMigrationURLProtocol: URLProtocol {

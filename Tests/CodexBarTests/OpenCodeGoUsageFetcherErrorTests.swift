@@ -385,8 +385,8 @@ struct OpenCodeGoUsageFetcherErrorTests {
         #expect(usage.providerCost?.period == "Zen balance")
         #expect(observedPaths.values.count == 4)
         #expect(Set(observedPaths.values) == [
-            "/console/api/go/status", "/workspace/wrk_TEST123/go",
-            "/console/api/billing/status", "/workspace/wrk_TEST123",
+            "/console/api/billing/status",
+            "/console/api/go/status", "/workspace/wrk_TEST123/go", "/workspace/wrk_TEST123",
         ])
     }
 
@@ -576,8 +576,11 @@ struct OpenCodeGoUsageFetcherErrorTests {
 
         #expect(observedPaths.values.count == 5)
         #expect(Set(observedPaths.values) == [
-            "/console/api/go/status", "/console/api/billing/status",
-            "/workspace/wrk_URL123/go", "/workspace/wrk_URL123", "/_server",
+            "/console/api/go/status",
+            "/console/api/billing/status",
+            "/workspace/wrk_URL123/go",
+            "/workspace/wrk_URL123",
+            "/_server",
         ])
     }
 
@@ -902,7 +905,9 @@ struct OpenCodeGoUsageFetcherErrorTests {
 
         #expect(observedCookie == "auth=test")
     }
+}
 
+extension OpenCodeGoUsageFetcherErrorTests {
     private static func goUsagePageHTML(
         workspaceID: String,
         rolling: UsageWindow,

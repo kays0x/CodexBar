@@ -15,6 +15,7 @@ struct OpenCodeWebCookieSupportTests {
         let header = OpenCodeWebCookieSupport.requestCookieHeader(from: "provider=google; theme=dark")
 
         #expect(header == nil)
+        #expect(OpenCodeWebCookieSupport.requestCookieHeader(from: "console_session=unverified") == nil)
     }
 
     /// The console signs its own requests, so its session cookie has to survive the filter.
