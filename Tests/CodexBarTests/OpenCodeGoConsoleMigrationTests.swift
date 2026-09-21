@@ -49,6 +49,13 @@ struct OpenCodeGoConsoleMigrationTests {
         """
     }
 
+    /// The server-rendered payload a workspace that has not migrated still returns.
+    private static let legacyUsagePageHTML = """
+    <script>$R[41]={rollingUsage:$R[42]={status:"ok",resetInSec:5944,usagePercent:17},\
+    weeklyUsage:$R[43]={status:"ok",resetInSec:278201,usagePercent:75},\
+    monthlyUsage:$R[44]={status:"ok",resetInSec:880201,usagePercent:91}};</script>
+    """
+
     /// The empty shell every console route serves, including the login redirect target.
     private static let consoleShellHTML = """
     <!DOCTYPE html><html><head><title>OpenCode Console</title>\
@@ -223,15 +230,75 @@ struct OpenCodeGoConsoleMigrationTests {
         #expect(requests.values == ["GET /console/api/go/status", "GET /workspace/wrk_TEST123/go"])
     }
 
+    /// The console uses a different cookie, so its rejection must not condemn a legacy session.
     @Test
-    func `console rejects an expired session as invalid credentials`() async throws {
+    func `console rejection keeps a working legacy session`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            requests.append(url.path)
+
+            if url.path.hasPrefix("/console/api/") {
+                return Self.makeResponse(url: url, body: #"{"message":"Unauthorized"}"#, statusCode: 401)
+            }
+            if url.path == "/_server" {
+                return Self.makeResponse(url: url, body: #"{"data":[{"id":"wrk_TEST123"}]}"#)
+            }
+            return Self.makeResponse(url: url, body: Self.legacyUsagePageHTML, contentType: "text/html")
+        }
+
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "auth=test",
+            timeout: 2,
+            now: Self.now,
+            includeZenBalance: false,
+            session: self.makeSession())
+
+        #expect(snapshot.rollingUsagePercent == 17)
+        #expect(snapshot.weeklyUsagePercent == 75)
+        #expect(requests.values.contains("/_server"))
+        #expect(requests.values.contains("/workspace/wrk_TEST123/go"))
+    }
+
+    /// A console timeout is not a credential problem and must not strand the legacy endpoints.
+    @Test
+    func `console transport failure falls back to the legacy page`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            requests.append(url.path)
+
+            if url.path.hasPrefix("/console/api/") {
+                throw URLError(.timedOut)
+            }
+            if url.path == "/_server" {
+                return Self.makeResponse(url: url, body: #"{"data":[{"id":"wrk_TEST123"}]}"#)
+            }
+            return Self.makeResponse(url: url, body: Self.legacyUsagePageHTML, contentType: "text/html")
+        }
+
+        let snapshot = try await OpenCodeGoUsageFetcher.fetchUsage(
+            cookieHeader: "auth=test",
+            timeout: 2,
+            now: Self.now,
+            includeZenBalance: false,
+            session: self.makeSession())
+
+        #expect(snapshot.rollingUsagePercent == 17)
+        #expect(requests.values.contains("/workspace/wrk_TEST123/go"))
+    }
+
+    /// Credentials are only expired once the legacy endpoints reject them too.
+    @Test
+    func `rejection by both console and legacy reports invalid credentials`() async throws {
         defer { ConsoleMigrationURLProtocol.handler = nil }
 
         ConsoleMigrationURLProtocol.handler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
-            guard url.path.hasPrefix("/console/api/") else {
-                return Self.makeResponse(url: url, body: Self.consoleShellHTML, contentType: "text/html")
-            }
             return Self.makeResponse(url: url, body: #"{"message":"Unauthorized"}"#, statusCode: 401)
         }
 

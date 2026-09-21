@@ -414,8 +414,12 @@ extension OpenCodeGoUsageFetcher {
                 cookieHeader: cookieHeader,
                 timeout: timeout,
                 session: session)
-        } catch let error as OpenCodeGoUsageError {
-            if case .invalidCredentials = error { throw error }
+        } catch let error where Self.isCancellation(error) {
+            throw CancellationError()
+        } catch {
+            // The console authenticates with its own session cookie, so rejecting a request says
+            // nothing about the legacy credentials, and a recoverable transport failure says nothing
+            // at all. The legacy page stays authoritative for both.
             Self.log.error("OpenCode Go console status unavailable; trying the legacy workspace page.")
             return try await self.fetchUsagePage(
                 workspaceID: workspaceID,
@@ -466,11 +470,20 @@ extension OpenCodeGoUsageFetcher {
                 timeout: timeout,
                 session: session)
             return self.parseConsoleWorkspaceIDs(text: text).first
-        } catch let error as OpenCodeGoUsageError {
-            if case .invalidCredentials = error { throw error }
+        } catch let error where Self.isCancellation(error) {
+            throw CancellationError()
+        } catch {
+            // Console rejection never invalidates the legacy session, which uses a different cookie.
             Self.log.error("OpenCode Go console workspaces unavailable; trying the legacy server function.")
             return nil
         }
+    }
+
+    /// Cancellation must never start another request, unlike every other console failure.
+    private static func isCancellation(_ error: some Error) -> Bool {
+        if error is CancellationError { return true }
+        if let error = error as? URLError, error.code == .cancelled { return true }
+        return Task.isCancelled
     }
 
     private static func fetchConsoleGoStatus(
