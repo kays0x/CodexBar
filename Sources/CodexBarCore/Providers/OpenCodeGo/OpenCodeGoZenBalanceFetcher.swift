@@ -150,12 +150,44 @@ extension OpenCodeGoUsageFetcher {
         OpenCodeGoZenBalanceParser.parse(text: text)
     }
 
+    /// Reads the prepaid balance from the console. Migrated workspaces no longer serve the scraped
+    /// workspace page, and the legacy billing server function redirects them to the console login.
+    static func fetchConsoleZenBalance(
+        workspaceID: String,
+        cookieHeader: String,
+        timeout: TimeInterval,
+        session: URLSession) async throws -> Double?
+    {
+        do {
+            let text = try await self.fetchConsoleText(
+                url: self.consoleBillingStatusURL,
+                workspaceID: workspaceID,
+                cookieHeader: cookieHeader,
+                timeout: timeout,
+                session: session)
+            return OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: text)
+        } catch let error where Self.isCancellation(error) {
+            throw CancellationError()
+        } catch {
+            // Console failures never condemn the legacy billing path, which uses a different cookie.
+            return nil
+        }
+    }
+
     static func fetchZenBalance(
         workspaceID: String,
         cookieHeader: String,
         timeout: TimeInterval,
         session: URLSession) async throws -> Double?
     {
+        if let balance = try await self.fetchConsoleZenBalance(
+            workspaceID: workspaceID,
+            cookieHeader: cookieHeader,
+            timeout: timeout,
+            session: session)
+        {
+            return balance
+        }
         let text = try await self.fetchPageText(
             url: self.zenDashboardURL(workspaceID: workspaceID),
             cookieHeader: cookieHeader,

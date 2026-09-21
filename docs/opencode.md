@@ -18,6 +18,9 @@ read_when:
   - `GET https://opencode.ai/console/api/orgs` lists workspaces (cookie auth only).
   - `GET https://opencode.ai/console/api/go/status` returns subscription meters and requires the workspace in the
     `x-org-id` header; the console answers HTTP 400 without it.
+  - `GET https://opencode.ai/console/api/billing/status` returns the prepaid balance as `balanceMicroCents`
+    (or `availableMicroCents` when a credit limit hides it), on the same micro-cent scale as the legacy
+    billing response.
 - `POST https://opencode.ai/_server` with server function IDs, used for workspaces that have not migrated to the
   console and for the Zen balance:
   - `workspaces` (`def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f`)

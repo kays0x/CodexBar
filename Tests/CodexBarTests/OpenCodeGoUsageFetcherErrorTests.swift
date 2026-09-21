@@ -341,7 +341,7 @@ struct OpenCodeGoUsageFetcherErrorTests {
             }
         }
 
-        #expect(methods.values == ["GET", "GET", "GET", "GET"])
+        #expect(methods.values == ["GET", "GET", "GET", "GET", "GET"])
     }
 
     @Test
@@ -383,9 +383,10 @@ struct OpenCodeGoUsageFetcherErrorTests {
         #expect(usage.secondary == nil)
         #expect(usage.providerCost?.used == 42.5)
         #expect(usage.providerCost?.period == "Zen balance")
-        #expect(observedPaths.values.count == 3)
+        #expect(observedPaths.values.count == 4)
         #expect(Set(observedPaths.values) == [
-            "/console/api/go/status", "/workspace/wrk_TEST123/go", "/workspace/wrk_TEST123",
+            "/console/api/go/status", "/workspace/wrk_TEST123/go",
+            "/console/api/billing/status", "/workspace/wrk_TEST123",
         ])
     }
 
@@ -424,7 +425,8 @@ struct OpenCodeGoUsageFetcherErrorTests {
         #expect(snapshot.isBalanceOnly)
         #expect(snapshot.zenBalanceUSD == 23.75)
         #expect(observedPaths.values == [
-            "/console/api/go/status", "/workspace/wrk_TEST123/go", "/workspace/wrk_TEST123",
+            "/console/api/go/status", "/workspace/wrk_TEST123/go",
+            "/console/api/billing/status", "/workspace/wrk_TEST123",
         ])
     }
 
@@ -572,12 +574,10 @@ struct OpenCodeGoUsageFetcherErrorTests {
             workspaceIDOverride: "https://opencode.ai/workspace/wrk_URL123/billing",
             session: self.makeSession())
 
-        #expect(observedPaths.values.count == 4)
+        #expect(observedPaths.values.count == 5)
         #expect(Set(observedPaths.values) == [
-            "/console/api/go/status",
-            "/workspace/wrk_URL123/go",
-            "/workspace/wrk_URL123",
-            "/_server",
+            "/console/api/go/status", "/console/api/billing/status",
+            "/workspace/wrk_URL123/go", "/workspace/wrk_URL123", "/_server",
         ])
     }
 
@@ -682,6 +682,7 @@ struct OpenCodeGoUsageFetcherErrorTests {
         OpenCodeGoStubURLProtocol.handler = { request in
             guard let url = request.url else { throw URLError(.badURL) }
             observedCookie = request.value(forHTTPHeaderField: "Cookie")
+            if let response = openCodeGoConsoleNotMigratedResponse(for: url) { return response }
             #expect(url.path == "/workspace/wrk_TEST123")
             return makeOpenCodeGoResponse(
                 url: url,

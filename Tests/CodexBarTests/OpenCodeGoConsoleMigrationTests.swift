@@ -318,6 +318,84 @@ struct OpenCodeGoConsoleMigrationTests {
         }
     }
 
+    /// Reported by the migrated pay-as-you-go workspace in steipete/CodexBar#3783: a $27.87 balance
+    /// arrives as micro-cents, the same scale the legacy billing response used.
+    @Test
+    func `parses the console prepaid balance`() throws {
+        let payload = """
+        {"billingMode":"prepaid","mode":"pay-as-you-go","balanceMicroCents":"2786781005",\
+        "creditLimitMicroCents":null,"availableMicroCents":"2786781005","canPurchaseCredits":true}
+        """
+        let balance = try #require(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: payload))
+        #expect((balance - 27.86781005).magnitude < 0.000001)
+
+        // A credit limit can hide the raw balance, so the available amount stands in.
+        let availableOnly = #"{"mode":"pay-as-you-go","availableMicroCents":1500000000}"#
+        #expect(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: availableOnly) == 15)
+
+        #expect(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: #"{"mode":"none"}"#) == nil)
+        #expect(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: Self.consoleShellHTML) == nil)
+    }
+
+    @Test
+    func `zen balance reads the console billing status`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        let requests = ConsoleRequestRecorder()
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            requests.append(url.path)
+
+            switch url.path {
+            case "/console/api/orgs":
+                return Self.makeResponse(url: url, body: #"[{"id":"wrk_TEST123","name":"Default"}]"#)
+            case "/console/api/billing/status":
+                return Self.makeResponse(
+                    url: url,
+                    body: #"{"mode":"pay-as-you-go","balanceMicroCents":"2786781005"}"#)
+            default:
+                // A migrated workspace has no Go subscription and no legacy payload.
+                return Self.makeResponse(url: url, body: Self.consoleShellHTML, contentType: "text/html")
+            }
+        }
+
+        let balance = try await OpenCodeGoUsageFetcher.fetchOptionalZenBalance(
+            cookieHeader: "auth=test; __Host-console_session=console456",
+            timeout: 2,
+            session: self.makeSession())
+
+        let resolved = try #require(balance)
+        #expect((resolved - 27.86781005).magnitude < 0.000001)
+        #expect(requests.values.contains("/console/api/billing/status"))
+    }
+
+    /// Workspaces that have not migrated keep the scraped balance.
+    @Test
+    func `zen balance falls back to the legacy workspace page`() async throws {
+        defer { ConsoleMigrationURLProtocol.handler = nil }
+
+        ConsoleMigrationURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            if url.path.hasPrefix("/console/api/") {
+                return Self.makeResponse(url: url, body: #"{"_tag":"NotFound"}"#, statusCode: 404)
+            }
+            if url.path == "/_server" {
+                return Self.makeResponse(url: url, body: #"{"data":[{"id":"wrk_TEST123"}]}"#)
+            }
+            return Self.makeResponse(
+                url: url,
+                body: #"<html><body><h2>Current balance $98.76</h2></body></html>"#,
+                contentType: "text/html")
+        }
+
+        let balance = try await OpenCodeGoUsageFetcher.fetchOptionalZenBalance(
+            cookieHeader: "auth=test",
+            timeout: 2,
+            session: self.makeSession())
+
+        #expect(balance == 98.76)
+    }
+
     @Test
     func `console JSON is not misread as a signed-out page`() {
         // The console shell and its JSON payloads mention login routes; only HTTP status decides.

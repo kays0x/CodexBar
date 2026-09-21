@@ -35,6 +35,8 @@ public struct OpenCodeGoUsageFetcher: Sendable {
     static let consoleWorkspacesURL = URL(string: "https://opencode.ai/console/api/orgs")!
     /// Go subscription meters for the workspace named by `consoleWorkspaceHeaderField`.
     static let consoleGoStatusURL = URL(string: "https://opencode.ai/console/api/go/status")!
+    /// Prepaid balance for the workspace named by `consoleWorkspaceHeaderField`.
+    static let consoleBillingStatusURL = URL(string: "https://opencode.ai/console/api/billing/status")!
     /// The console answers HTTP 400 when this header is missing.
     static let consoleWorkspaceHeaderField = "x-org-id"
 
@@ -480,7 +482,7 @@ extension OpenCodeGoUsageFetcher {
     }
 
     /// Cancellation must never start another request, unlike every other console failure.
-    private static func isCancellation(_ error: some Error) -> Bool {
+    static func isCancellation(_ error: some Error) -> Bool {
         if error is CancellationError { return true }
         if let error = error as? URLError, error.code == .cancelled { return true }
         return Task.isCancelled
@@ -507,7 +509,7 @@ extension OpenCodeGoUsageFetcher {
 
     /// Console responses are JSON and report a signed-out session as HTTP 401, so unlike the legacy
     /// pages they must not be classified by body text.
-    private static func fetchConsoleText(
+    static func fetchConsoleText(
         url: URL,
         workspaceID: String?,
         cookieHeader: String,

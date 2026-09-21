@@ -18,6 +18,35 @@ enum OpenCodeGoZenBalanceParser {
         return self.extractDollarValue(pattern: nearbyPattern, text: text)
     }
 
+    /// Reads the console's prepaid balance, which uses the same micro-cent scale as the legacy
+    /// billing response. `availableMicroCents` stands in when a credit limit hides the raw balance.
+    static func parseConsoleBillingStatus(text: String) -> Double? {
+        guard let data = text.data(using: .utf8),
+              let dict = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any]
+        else {
+            return nil
+        }
+        for key in ["balanceMicroCents", "availableMicroCents"] {
+            if let raw = self.numberValue(from: dict[key]) {
+                return raw / self.billingScale
+            }
+        }
+        return nil
+    }
+
+    private static func numberValue(from value: Any?) -> Double? {
+        let number: Double? = switch value {
+        case let number as NSNumber:
+            number.doubleValue
+        case let string as String:
+            Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            nil
+        }
+        guard let number, number.isFinite else { return nil }
+        return number
+    }
+
     static func parseBillingServerResponse(text: String) -> Double? {
         if let data = text.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data, options: []),
