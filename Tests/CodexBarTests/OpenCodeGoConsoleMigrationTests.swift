@@ -367,7 +367,8 @@ struct OpenCodeGoConsoleMigrationTests {
         {"billingMode":"prepaid","mode":"pay-as-you-go","balanceMicroCents":"2786781005",\
         "creditLimitMicroCents":null,"availableMicroCents":"2786781005","canPurchaseCredits":true}
         """
-        let balance = try #require(OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: payload))
+        let parsed = try OpenCodeGoZenBalanceParser.parseConsoleBillingStatus(text: payload)
+        let balance = try #require(parsed)
         #expect((balance - 27.86781005).magnitude < 0.000001)
 
         // Available credit is a different field and cannot stand in for a missing balance.

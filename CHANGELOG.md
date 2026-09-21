@@ -153,7 +153,7 @@
 - Antigravity: preserve useful earlier source errors when an unavailable final source stops fallback, while keeping cancellation and later substantive errors authoritative (#3701, related to #3683). Thanks @hhh2210!
 - Kimi: accept ratio-pool Code API responses, preserve absent weekly quotas, and show the reported monthly Total usage without browser authentication (#3697, fixes #3694). Thanks @eliasburlison!
 - Copilot: show configured seat-credit progress in Automatic provider tabs when no metered quota window is available, preserving explicit metric choices (#3681). Thanks @KSEGIT!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: make Monthly usage selectable in the menu-bar percentage picker and layout palette before the first snapshot, preserving custom layout tokens (#3645, fixes #3644). Thanks @egigoka!
 - Sharing: use the last included reporting day and dashboard timezone in images and copied text (#3692). Thanks @Chipagosfinest!
 - Sharing: label a single included subscription correctly on shared usage cards (#3706, related to #3704). Thanks @Chipagosfinest!
 - Settings: add a Copy button for the Homebrew update command in About and allow selecting the update instructions (#3686, fixes #3682). Thanks @harjothkhara!
@@ -518,7 +518,7 @@
 - Codex: preserve pending weekly-reset evidence through credits-only refreshes so eligible low-usage confirmations survive relaunch (partial fix for #3248). Thanks @kcharlan!
 - Charts: keep endpoint dates readable in token/cost, credit-usage, credits-history, and plan-history submenus (partial fix for #3209). Thanks @vinschger!
 - Agent sessions: stop Codex metadata enrichment and Pi/OMP path resolution when the scan budget expires, and honor the same deadline during Claude Desktop root discovery.
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: omit misleading pace and run-out advice for locally estimated quotas while preserving percentages, resets, and cost history (partial fix for #3286). Thanks @Akagilnc!
 - OpenRouter: open Activity from Usage Dashboard instead of credit settings (#3290). Thanks @akshayprabhu200!
 
 ## 0.56.1 — 2026-08-30
@@ -562,7 +562,7 @@
 - Overview: preserve known history-day coverage when another selected subscription has no spend data, while keeping incomplete totals marked partial (#3129). Thanks @Yuxin-Qiao!
 - Codex: refresh local session cost estimates when global cost tracking is off instead of repeatedly rejecting successful scans as stale. Thanks @vinschger!
 - Codex: finish older partial session histories during busy cost scans without increasing scan limits or rebuilding compatible caches (#3207). Thanks @IchenDEV!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: show API percentages at their correct scale, so 1% usage no longer appears as 100%, including local-history overlays (#3216). Thanks @rodrigoalma!
 - Antigravity: show the most constrained known quota separately for session and weekly menu-bar values, so unused model families do not hide consumed quota (#3206). Thanks @foobra!
 - Claude: honor the used/remaining fill preference for capped Extra Usage, so an exhausted cap is empty in remaining mode (#3213). Thanks @vinschger!
 - OpenRouter: consistently label the API key spending limit as a cap, separate from the account balance (#3158). Thanks @vinschger!
@@ -594,7 +594,7 @@
 - Fireworks: show real 30-day API billing spend even when local cost summaries are disabled (#3183, #3185). Thanks @dhalarewich!
 - OpenRouter: accept timestamp-shaped Activity API dates so exact 30-day spend history loads again (#3174).
 - Amp: parse bold Markdown usage labels from the latest CLI while preserving compatibility with older plain-text output (#3171).
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: expose a Monthly % lane token for custom menu bar layouts once the monthly window has been observed (#3175).
 
 ### Performance
 - Grok: keep menu opening responsive by reusing published local-session totals and moving filesystem scans off the main thread (#3195).
@@ -720,7 +720,7 @@
 ### Providers
 - Codex: added a personal-access-token usage source — `personal_access_token` in `auth.json` gets its own PAT strategy (whoami then `/wham/usage`), Auto prefers a usable PAT and falls back to OAuth/CLI, and ambient-home PATs are found when a managed profile would hide them (#3060). Thanks @oakimov!
 - Fireworks: auto-discover account slugs from API keys and report invalid or ambiguous accounts instead of silently showing no spend (#3068, #3074).
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: use the public authenticated usage API when `OPENCODE_API_KEY` is configured, overlaying authoritative rolling/weekly/monthly windows on local history with cookie fallback (#2879, #3065). Thanks @akshayprabhu200!
 - Hide untouched Antigravity model families in the `codexbar serve` web dashboard, matching the menu and widgets (#3061). Thanks @urda!
 
 ### Localization
@@ -756,7 +756,7 @@
 - iCloud sync: stop awaiting CKSyncEngine from within its own delegate callbacks, fixing a fatal CloudKit assertion crash minutes after launch with sync enabled (#3030). Thanks @toads for the crash forensics!
 - Settings: replace the selector-based Settings opener with a retained window controller, fixing silently failing or behind-other-apps Settings opening after the keepalive removal, and repairing localized application-menu commands (#3029). Thanks @Zihao-Qi!
 - Codex: classify app-server request timeouts before terminating the subprocess, so timeouts no longer surface as misleading EOF/malformed-response errors (#3022). Thanks @Chipagosfinest!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: surface expired selected session tokens instead of silently replacing failed server usage with local quota estimates (#2993). Thanks @Niclassslua!
 - Cursor: keep an API-validated usage result when the Keychain cache is temporarily unavailable, instead of treating it as a missing or replaced session (#3000). Thanks @hxy91819!
 - Menu: prevent the system menu highlight from painting behind provider detail cards on macOS 27 beta (#2998). Thanks @Tan1103!
 
@@ -787,7 +787,7 @@
 
 ### Fixed
 - Keychain: keep background browser imports non-interactive, honor the global access gate, retire the obsolete prompt-capable startup migration, and retry unreadable unified migrations without clearing secrets (#2986).
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: label local-only quota windows as estimates in the menu and CLI when Auto has no server-confirmed usage (#2982). Thanks @Newarr!
 
 ## 0.50.1 — 2026-08-16
 
@@ -807,7 +807,7 @@
 - Usage & Spend: keep safely priced Codex totals visible after completed history scans when request-tier uncertainty leaves some days unpriced (#2948). Thanks @Atopoz for the report!
 - Vertex AI: match Cloud Monitoring quota usage without a `limit_name` to its unambiguous same-metric, same-location limit, restoring quota percentages (#2958). Thanks @MachApple!
 - Cursor: rename the included-usage split to Cursor and Third Party across menu, widgets, and menu-bar windows, matching Cursor's dashboard labels (#2951). Thanks @baanish!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: report pace for the 5-hour and weekly usage windows in CLI text and JSON output (#2957). Thanks @kentoku24!
 - Mistral: show current-month API spend in Icon and Percent menu-bar layouts when pay-as-you-go accounts have no rate window (#2821, #2947). Thanks @kiranmagic7!
 - CLI: keep Codex app-server notifications and child diagnostics behind verbose logging instead of writing them to stderr on every probe (#2952). Thanks @urda!
 - Ollama: strip copied `Cookie:` and cURL syntax before sending manual WorkOS session headers when another cookie appears first (#2949). Thanks @Skythrill256!
@@ -988,7 +988,7 @@
 - Kimi/GLM: distinguish Kimi Code from the regional Open Platform, bind China and international keys to their issuing hosts, and show GLM Coding Plan's 5-hour window as primary with MCP separate (#2351). Thanks @Leehow!
 - z.ai/GLM: route BigModel aliases and relay-file keys only to China endpoints, reject canonical cross-region overrides before bearer auth, and keep Kimi browser import disabled when Cookie Source is Off (#2351). Thanks @Leehow!
 - Sessions: discover live pi and OMP sessions through one Pi-family scanner, with dialect-aware metadata, PID-only startup rows, and mixed-version CLI/remote support (#2529). Thanks @wdmitchelluk!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: per-model cost and request breakdowns by day in the shared cost history chart, resolved from the local session database (#2649). Thanks @kentoku24!
 - Copilot: decode the AI credits counter for token-billed seats and expose it in `codexbar diagnose`, so Business seats with zero-entitlement quotas are no longer blank at the data layer (#2613, refs #2593). Thanks @Yuxin-Qiao, and @KSEGIT for the discovery!
 - CLI: expose Codex cost-history completeness in JSON and add an experimental provider-native-only scan mode (#2520). Thanks @NickGuAI!
 - Currency: Korean won (KRW) in the preferred-currency picker, with correct zero-decimal formatting (#2669, refs #2449). Thanks @kes02!
@@ -1017,7 +1017,7 @@
 - Command Code: parse and display 5-hour and weekly rolling limits alongside monthly credits and reset times (#2466). Thanks @derekszen!
 - Command Code: recognize the Individual GOAT plan ($70/mo credits) and the new production cookie names while keeping the legacy bare-token fallback (#2706). Thanks @KronixDev!
 - OpenRouter: use the server-reported current-period remaining for the key-limit meter and "left" text instead of deriving both from cumulative lifetime usage (#2612, fixes #2605). Thanks @Yuxin-Qiao!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: include Zen balance in CLI usage reads without waiting beyond five seconds (#2583). Thanks @Yuxin-Qiao!
 - ZoomMate: preserve browser cookie scope so parent-domain sessions reach both API hosts without leaking host-only cookies (fixes #2507). Thanks @weddle!
 - Sync: propagate provider configuration edits made by the CLI or directly in `config.json` to the iCloud fleet without echoing remotely applied writes.
 - Usage & Spend: keep priced Codex model rows visible when the history also contains unpriced Auto Review routing rows, labeled as a partial breakdown with ranking removed (#2643). Thanks @akshayprabhu200!
@@ -1056,7 +1056,7 @@
 - Usage: populate verified z.ai, Kimi, and Grok rate-window durations for pace and forecasts while leaving unknown provider cadences unset (#2431, supersedes #2514). Thanks @Yuxin-Qiao!
 - Command Code: persist validated browser sessions so CLI refreshes and the local service can reuse them (#2541). Thanks @rbonill!
 - Menu: provider tab switches no longer blank out card rows mid-switch. Cached tab content is replanted into the attached hosting views (SwiftUI payload swap) instead of detaching `item.view`, which made Tahoe's NSMenu paint fallback "NSMenuItem" placeholder rows for a few frames; residual structural churn now renders blank instead of placeholder text. Verified frame-by-frame via 120fps screen recordings driven by the self-probe.
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: read idle WAL-mode local history without creating SQLite sidecars (#2544). Thanks @Astro-Han for the report!
 - Keychain: stop "CodexBar Cache" login-keychain password prompts from dev and test tooling. Unbundled processes (`swift build` binaries, dev CLI runs) now use a process-local cache instead of the shared keychain item, never freeze a broken trusted-app ACL onto it, and test-blocked processes disable legacy keychain interaction process-wide and export the suppression flag to spawned child binaries.
 - MiMo/StepFun: feed monthly token-plan windows into usage history, pace, and forecasts (#2526, part of #2431). Thanks @LeoLin990405!
 - CLI: clearer error when setting an API key for the codex provider — point users to the openai provider for Platform keys (#2510, fixes #2501). Thanks @Yuxin-Qiao!
@@ -1122,14 +1122,14 @@
 - Command Code: improve progress-bar contrast in dark mode (#2333). Thanks @Baksalyar!
 - Widgets: keep cost rows on one line with large token counts (#2337). Thanks @zhulijin1991!
 - OpenCode/OpenCode Go: preserve computed sub-1% usage percentages instead of rescaling them as direct fractions (#2331). Thanks @OfficialAbhinavSingh!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: prefer local usage for unscoped Auto refreshes while keeping account- and workspace-scoped requests web-first (#2316). Thanks @kiranmagic7!
 
 ## 0.45.1 — 2026-07-19
 
 ### Added
 - Claude: show per-model weekly claude-swap usage windows from schema-v1 account listings (#2310). Thanks @AlexGodard!
 - Claude: allow an opt-in claude-swap card when only one account is available (#2280). Thanks @possibilities!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: add daily local cost and plan-usage history (#2296). Thanks @kentoku24!
 - Overview: raise the merged provider limit from three to six (#2314). Thanks @BobbyWang0120!
 
 ### Changed
@@ -1442,7 +1442,7 @@
 - Architecture: define the security and identity boundaries required before custom HTTP JSON providers can be implemented safely.
 - Claude: accept a display-only multi-account design based on read-only `claude-swap --list --json`, without account switching or credential storage.
 - Notifications: accept a default-off predictive pace warning design that alerts once per risk episode and re-arms only after authoritative recovery.
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: accept bounded automatic multi-workspace fan-out while preserving the configured workspace as an exact single-workspace override.
 - Xiaomi MiMo: require authoritative cadence evidence before showing reserve or deficit projections, avoiding guesses from plan dates or names.
 
 ### Fixed
@@ -1487,7 +1487,7 @@
 - Claude history: keep OAuth utilization separate across account switches while preserving continuity through token refreshes.
 - Linux CLI: keep Claude OAuth usage subprocess-free, skip version probes, and let Auto bypass unsupported web sources. Thanks @derekszen!
 - Usage display: make Usage widgets follow the used-versus-remaining preference already shared by menus and Overview rows (#1738). Thanks @OlegLustenko and @FrancoLan!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: keep rolling usage available when the dashboard omits the optional weekly window. Thanks @mohkg1017!
 - Menu bar: make Show most-used provider rank only providers selected for Overview. Thanks @dstier-git!
 - Codex: show expiring reset-credit availability even when optional credits and extra usage are hidden, while preserving CLI `--no-credits`. Thanks @simon-ami!
 - Claude CLI: prevent logged-out background Auto fallbacks from opening browser OAuth during app refresh. Thanks @afarwind!
@@ -1606,7 +1606,7 @@
 - Menu bar: show provider status markers only for the provider rendered in each icon. Thanks @Zihao-Qi!
 - Codex CLI: make automatic usage reads prefer OAuth and CLI sources instead of blocking on the optional web dashboard.
 - Codex web: apply `--web-timeout` to the full cookie import, account verification, retry, and dashboard fetch path.
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: allow configured manual cookies in the Linux CLI while keeping browser-cookie import gated to macOS. Thanks @Yuxin-Qiao!
 - Provider probes: cap captured subprocess output at 1 MiB per stream without dropping valid text at a truncated UTF-8 boundary. Thanks @ProspectOre!
 - Provider switcher: keep Codex quota rows visible when switching away and back during a manual refresh, including menus with usage-history sections. Thanks @Yuxin-Qiao!
 - Bedrock: ignore invalid billing dates when selecting the latest usage values. Thanks @ProspectOre!
@@ -1666,7 +1666,7 @@
 - Gemini: keep fnm package discovery bounded when helper descendants retain output pipes or ignore termination (fixes #1534). Thanks @kiranmagic7!
 - Xiaomi MiMo: cancel optional token-plan requests when the required balance request fails instead of delaying the error for up to 30 seconds.
 - Settings: make the cost history window directly editable by keyboard while preserving the existing stepper and 1–365 day bounds (fixes #1499). Thanks @kiranmagic7!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: show Zen balances for accounts without subscription usage windows, including when the balance request takes longer than optional enrichment (fixes #1476). Thanks @kiranmagic7!
 
 ## 0.35.0 — 2026-06-14
 
@@ -1921,7 +1921,7 @@
 - Claude: normalize OAuth extra-usage spend limits from minor units so Enterprise spend displays as currency instead of 100x too high (#1114, fixes #1111). Thanks @Yuxin-Qiao!
 - Menu bar: preserve status item identity during display-change recovery so menu bar managers do not treat CodexBar as a new hidden item (#1122, fixes #1109). Thanks @lederniermagicien!
 - OpenAI: retry transient Admin API usage failures once before surfacing an access error (#1117).
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: read local usage history before falling back to browser-cookie dashboard fetches (#1021). Thanks @sopenlaz0!
 - Menu bar: show extra-usage spend as currency text for Claude and Cursor when that metric is selected (#1107). Thanks @Yuxin-Qiao!
 - Codex: run regular credits and OpenAI dashboard refreshes in the background while coalescing overlapping refresh work (#1078). Thanks @ptstory!
 
@@ -1989,7 +1989,7 @@
 - LLM Proxy: add API-key quota-stats support for aggregate proxy usage, key health, spend, provider breakdowns, and reset windows (#264).
 - Claude: add an Anthropic Admin API source and allow `sk-ant-admin...` keys in Claude token accounts for API spend/token tracking (#966).
 - MiniMax: add web-session billing-history summaries with 30-day token charts and top model/method breakdowns (#1007).
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: show the optional Zen pay-as-you-go balance from the workspace dashboard alongside subscription windows (#1006).
 - Kiro: add overage-credit and overage-cost menu bar display modes for exhausted plans (#972). Thanks @raflyazf!
 - CLI: add `codexbar config set-api-key` for safely storing provider API keys from stdin.
 - CLI: add `codexbar config providers`, `enable`, and `disable` for scripting the same provider toggles used by Settings.
@@ -2044,7 +2044,7 @@
 - CLI: add `codexbar serve` for localhost JSON access to usage and cost endpoints (#957). Thanks @ThiagoCAltoe!
 
 ### Fixed
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: block cross-host redirects when fetching usage so imported cookies cannot follow external redirect targets (#969). Thanks @pavbar!
 - Codex: keep background `/status` probes out of Codex Desktop history by using isolated non-persistent CLI storage (#953).
 - Menu: stabilize the Cost submenu by using a native menu item and deferring open-menu rebuilds while tracking (#954). Thanks @getogrand!
 - Localization: add Brazilian Portuguese quota-warning settings strings (#958). Thanks @ThiagoCAltoe!
@@ -2076,7 +2076,7 @@
 - Cost history: label local log totals as API-rate estimates in menu cards, charts, and CLI output (#926). Thanks @yashiels!
 - Cursor: open Add Account in the user's browser and import the resulting browser session instead of trapping login in an embedded web view (#922).
 - Claude: handle Enterprise and organization spend-limit usage across OAuth/web accounts, including null session quota windows, inline spend-limit usage, `extra_usage`-only responses, and token-account Org ID support (#925, #941, fixes #940). Thanks @clintandrewhall!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: let automatic cookie import scan all supported browser sources instead of Chrome only (#665).
 - Copilot: preserve over-quota usage so paid overage can show above 100% instead of clamping to exhausted (#818).
 - Codex: pause background CLI launches after macOS blocks or quarantines `codex`, avoiding repeated "Malware Blocked" prompts (#942).
 - Claude: clarify that local cost/token estimates include cache read/write tokens and may differ from Claude Code `/status` (#781, #787).
@@ -2200,7 +2200,7 @@
 - CLI: read MiniMax coding-plan tokens from `MINIMAX_CODING_API_KEY`, accept Alibaba Qwen/DashScope API-key aliases, and avoid duplicate generic JSON error rows after provider failures.
 - CLI discovery: prefer known install paths before interactive shell probing so common Claude installs no longer run shell init hooks during binary detection (#775).
 - CLI lookup: drain login-shell probe output and terminate spawned process groups so interactive shell helpers cannot leak after path detection (#822, fixes #821). Thanks @LPFchan!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: open the workspace-specific usage dashboard when a workspace ID is configured (#667). Thanks @RizaSatya!
 - Augment: use the API-provided credits limit when available instead of reconstructing the limit from consumed plus remaining credits (#338). Thanks @bcharleson!
 - MiniMax: ignore login strings embedded in scripts when checking web-session pages for signed-out state (#508). Thanks @qipihen!
 - Accounts: refresh the selected provider data and open menu after switching token accounts, even while a menu-open refresh is running (#799, fixes #798). Thanks @Zeko369!
@@ -2307,7 +2307,7 @@
 
 ### Providers & Usage
 - Perplexity: add recurring, bonus, and purchased-credit tracking; plan detection for Pro/Max; browser-cookie auto-import; and manual-cookie fallback (#449). Thanks @BeelixGit!
-- OpenCode Go: restore migrated Console quota windows and prepaid Zen balances, preserve independent legacy sessions, and keep missing reset times unknown instead of reporting expired credentials or immediate resets (#3796, fixes #3783). Thanks @kays0x and @NOIPJohnny!
+- OpenCode Go: add a dedicated provider, parse live authenticated workspace Go usage from the web app, keep monthly optional and honor workspace env overrides.
 - Codex: add workspace attribution for account labels and same-email multi-workspace accounts.
 - Codex: reconcile live-system and managed accounts by canonical identity, preserve account-scoped usage/history/dashboard state, allow OAuth CLI fallback, and tighten OpenAI web ownership gating so quota and credits only attach to the matching account. Thanks @monterrr and @Rag30 for the initial effort and ideas!
 - Codex: normalize weekly-only rate limits across OAuth and CLI/RPC so free-plan accounts render as Weekly instead of a fake Session, preserve unknown single-window payloads in the primary lane, hide the empty Session lane in widgets, and accept weekly-only Codex CLI `/status`/RPC data without failing. @ratulsarna
